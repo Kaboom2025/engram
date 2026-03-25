@@ -85,7 +85,7 @@ class EngramConfig:
         if model == "text-embedding-3-small":
             kwargs.setdefault("embedding_dim", 1536)
         elif model.startswith("models/") or model.startswith("gemini"):
-            kwargs.setdefault("embedding_dim", 768)
+            kwargs.setdefault("embedding_dim", 3072)
 
         return cls(**kwargs)
 

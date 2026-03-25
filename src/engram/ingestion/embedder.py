@@ -15,7 +15,7 @@ class Embedder:
     Unified embedder supporting three providers:
     - local: sentence-transformers (text only, free, 384-dim)
     - openai: text-embedding-3-small (text only, 1536-dim)
-    - google: Gemini embedding (multimodal: text + images, 768-dim)
+    - google: gemini-embedding-2-preview (multimodal: text + images + video + audio + PDFs, 3072-dim)
     """
 
     def __init__(self, config: EngramConfig) -> None:
@@ -55,24 +55,43 @@ class Embedder:
         return await self._embed_local_batch(texts)
 
     async def embed_image(self, image_path: str) -> list[float]:
-        """Embed an image file (Google multimodal only)."""
+        """Embed an image file (Google Gemini multimodal only)."""
         if self.provider != "google":
             raise NotImplementedError(
                 "Image embedding requires Google Gemini. "
-                "Set embedding_model='models/gemini-embedding-exp-03-07'"
+                "Set embedding_model='gemini-embedding-2-preview'"
             )
         return await self._embed_google_image(image_path)
 
+    async def embed_file(self, file_path: str) -> list[float]:
+        """Embed any supported file: image, video, audio, PDF (Google Gemini only).
+
+        Supported formats:
+        - Images: PNG, JPEG, GIF, WebP
+        - Video: MP4, MOV, AVI (up to 120s)
+        - Audio: MP3, WAV, FLAC (up to 80s)
+        - Documents: PDF (up to 6 pages)
+        """
+        if self.provider != "google":
+            raise NotImplementedError(
+                "File embedding requires Google Gemini. "
+                "Set embedding_model='gemini-embedding-2-preview'"
+            )
+        return await self._embed_google_image(file_path)  # same API handles all file types
+
     async def embed_multimodal(
-        self, text: str | None = None, image_path: str | None = None
+        self, text: str | None = None, file_path: str | None = None
     ) -> list[float]:
-        """Embed text + image together (Google multimodal only)."""
+        """Embed text + file together as a single multimodal embedding (Google Gemini only).
+
+        The file can be an image, video, audio, or PDF.
+        """
         if self.provider != "google":
             raise NotImplementedError(
                 "Multimodal embedding requires Google Gemini. "
-                "Set embedding_model='models/gemini-embedding-exp-03-07'"
+                "Set embedding_model='gemini-embedding-2-preview'"
             )
-        return await self._embed_google_multimodal(text, image_path)
+        return await self._embed_google_multimodal(text, file_path)
 
     # ── Local (sentence-transformers) ─────────────────────────────────────
 
@@ -196,14 +215,24 @@ def _guess_mime(path: Path) -> str:
     """Guess MIME type from file extension."""
     suffix = path.suffix.lower()
     return {
+        # Images
         ".jpg": "image/jpeg",
         ".jpeg": "image/jpeg",
         ".png": "image/png",
         ".gif": "image/gif",
         ".webp": "image/webp",
         ".bmp": "image/bmp",
+        # Documents
         ".pdf": "application/pdf",
+        # Video
         ".mp4": "video/mp4",
         ".mov": "video/quicktime",
         ".avi": "video/x-msvideo",
+        ".webm": "video/webm",
+        # Audio
+        ".mp3": "audio/mpeg",
+        ".wav": "audio/wav",
+        ".flac": "audio/flac",
+        ".ogg": "audio/ogg",
+        ".m4a": "audio/mp4",
     }.get(suffix, "application/octet-stream")
