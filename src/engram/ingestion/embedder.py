@@ -1,66 +1,209 @@
-"""Embedding generation — local (sentence-transformers) or cloud (OpenAI)."""
+"""Embedding generation — local, OpenAI, or Google Gemini (multimodal)."""
 
 from __future__ import annotations
 
 import asyncio
-from functools import partial
+import base64
+from pathlib import Path
+from typing import Any
 
 from engram.config import EngramConfig
 
 
 class Embedder:
+    """
+    Unified embedder supporting three providers:
+    - local: sentence-transformers (text only, free, 384-dim)
+    - openai: text-embedding-3-small (text only, 1536-dim)
+    - google: Gemini embedding (multimodal: text + images, 768-dim)
+    """
+
     def __init__(self, config: EngramConfig) -> None:
         self.config = config
-        self._model = None
-        self._client = None
+        self._local_model = None
+        self._openai_client = None
+        self._google_client = None
 
-    def _ensure_local_model(self):
-        if self._model is None:
-            from sentence_transformers import SentenceTransformer
+    @property
+    def provider(self) -> str:
+        """Which embedding provider is active."""
+        model = self.config.embedding_model
+        if model.startswith("models/") or model.startswith("gemini"):
+            return "google"
+        if model.startswith("text-embedding"):
+            return "openai"
+        return "local"
 
-            self._model = SentenceTransformer(self.config.embedding_model)
+    # ── Public API ────────────────────────────────────────────────────────
 
     async def embed(self, text: str) -> list[float]:
         """Embed a single text string."""
-        if self.config.local:
-            return await self._embed_local(text)
-        return await self._embed_cloud(text)
+        p = self.provider
+        if p == "google":
+            return await self._embed_google_text(text)
+        if p == "openai":
+            return await self._embed_openai(text)
+        return await self._embed_local(text)
 
     async def embed_batch(self, texts: list[str]) -> list[list[float]]:
-        """Embed a batch of texts."""
-        if self.config.local:
-            return await self._embed_local_batch(texts)
-        return await self._embed_cloud_batch(texts)
+        """Embed a batch of text strings."""
+        p = self.provider
+        if p == "google":
+            return await self._embed_google_text_batch(texts)
+        if p == "openai":
+            return await self._embed_openai_batch(texts)
+        return await self._embed_local_batch(texts)
+
+    async def embed_image(self, image_path: str) -> list[float]:
+        """Embed an image file (Google multimodal only)."""
+        if self.provider != "google":
+            raise NotImplementedError(
+                "Image embedding requires Google Gemini. "
+                "Set embedding_model='models/gemini-embedding-exp-03-07'"
+            )
+        return await self._embed_google_image(image_path)
+
+    async def embed_multimodal(
+        self, text: str | None = None, image_path: str | None = None
+    ) -> list[float]:
+        """Embed text + image together (Google multimodal only)."""
+        if self.provider != "google":
+            raise NotImplementedError(
+                "Multimodal embedding requires Google Gemini. "
+                "Set embedding_model='models/gemini-embedding-exp-03-07'"
+            )
+        return await self._embed_google_multimodal(text, image_path)
+
+    # ── Local (sentence-transformers) ─────────────────────────────────────
+
+    def _ensure_local_model(self):
+        if self._local_model is None:
+            from sentence_transformers import SentenceTransformer
+            self._local_model = SentenceTransformer(self.config.embedding_model)
 
     async def _embed_local(self, text: str) -> list[float]:
         def _encode():
             self._ensure_local_model()
-            return self._model.encode(text, normalize_embeddings=True).tolist()
-
+            return self._local_model.encode(text, normalize_embeddings=True).tolist()
         return await asyncio.get_event_loop().run_in_executor(None, _encode)
 
     async def _embed_local_batch(self, texts: list[str]) -> list[list[float]]:
         def _encode():
             self._ensure_local_model()
-            embeddings = self._model.encode(texts, normalize_embeddings=True, batch_size=64)
+            embeddings = self._local_model.encode(
+                texts, normalize_embeddings=True, batch_size=64
+            )
             return [e.tolist() for e in embeddings]
-
         return await asyncio.get_event_loop().run_in_executor(None, _encode)
 
-    async def _embed_cloud(self, text: str) -> list[float]:
-        results = await self._embed_cloud_batch([text])
+    # ── OpenAI ────────────────────────────────────────────────────────────
+
+    async def _embed_openai(self, text: str) -> list[float]:
+        results = await self._embed_openai_batch([text])
         return results[0]
 
-    async def _embed_cloud_batch(self, texts: list[str]) -> list[list[float]]:
+    async def _embed_openai_batch(self, texts: list[str]) -> list[list[float]]:
         import openai
-
-        if self._client is None:
-            self._client = openai.AsyncOpenAI(
+        if self._openai_client is None:
+            self._openai_client = openai.AsyncOpenAI(
                 api_key=self.config.extraction_api_key or self.config.api_key
             )
-
-        response = await self._client.embeddings.create(
+        response = await self._openai_client.embeddings.create(
             model=self.config.cloud_embedding_model,
             input=texts,
         )
         return [item.embedding for item in response.data]
+
+    # ── Google Gemini (multimodal) ────────────────────────────────────────
+
+    def _ensure_google_client(self):
+        if self._google_client is None:
+            from google import genai
+            api_key = self.config.google_api_key or self.config.extraction_api_key
+            if not api_key:
+                raise ValueError(
+                    "Google API key required for Gemini embeddings. "
+                    "Set ENGRAM_GOOGLE_API_KEY or GOOGLE_API_KEY."
+                )
+            self._google_client = genai.Client(api_key=api_key)
+
+    async def _embed_google_text(self, text: str) -> list[float]:
+        def _call():
+            self._ensure_google_client()
+            result = self._google_client.models.embed_content(
+                model=self.config.embedding_model,
+                contents=text,
+            )
+            return list(result.embeddings[0].values)
+        return await asyncio.get_event_loop().run_in_executor(None, _call)
+
+    async def _embed_google_text_batch(self, texts: list[str]) -> list[list[float]]:
+        def _call():
+            self._ensure_google_client()
+            result = self._google_client.models.embed_content(
+                model=self.config.embedding_model,
+                contents=texts,
+            )
+            return [list(emb.values) for emb in result.embeddings]
+        return await asyncio.get_event_loop().run_in_executor(None, _call)
+
+    async def _embed_google_image(self, image_path: str) -> list[float]:
+        def _call():
+            from google.genai import types
+            self._ensure_google_client()
+
+            path = Path(image_path)
+            image_bytes = path.read_bytes()
+            mime = _guess_mime(path)
+
+            part = types.Part.from_bytes(data=image_bytes, mime_type=mime)
+            result = self._google_client.models.embed_content(
+                model=self.config.embedding_model,
+                contents=part,
+            )
+            return list(result.embeddings[0].values)
+        return await asyncio.get_event_loop().run_in_executor(None, _call)
+
+    async def _embed_google_multimodal(
+        self, text: str | None, image_path: str | None
+    ) -> list[float]:
+        """Embed text + image together as a single multimodal embedding."""
+        def _call():
+            from google.genai import types
+            self._ensure_google_client()
+
+            parts = []
+            if text:
+                parts.append(text)
+            if image_path:
+                path = Path(image_path)
+                image_bytes = path.read_bytes()
+                mime = _guess_mime(path)
+                parts.append(types.Part.from_bytes(data=image_bytes, mime_type=mime))
+
+            if not parts:
+                raise ValueError("At least one of text or image_path must be provided")
+
+            result = self._google_client.models.embed_content(
+                model=self.config.embedding_model,
+                contents=parts,
+            )
+            return list(result.embeddings[0].values)
+        return await asyncio.get_event_loop().run_in_executor(None, _call)
+
+
+def _guess_mime(path: Path) -> str:
+    """Guess MIME type from file extension."""
+    suffix = path.suffix.lower()
+    return {
+        ".jpg": "image/jpeg",
+        ".jpeg": "image/jpeg",
+        ".png": "image/png",
+        ".gif": "image/gif",
+        ".webp": "image/webp",
+        ".bmp": "image/bmp",
+        ".pdf": "application/pdf",
+        ".mp4": "video/mp4",
+        ".mov": "video/quicktime",
+        ".avi": "video/x-msvideo",
+    }.get(suffix, "application/octet-stream")

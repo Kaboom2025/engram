@@ -22,7 +22,7 @@ class KuzuBackend(GraphBackend):
         self._conn: kuzu.Connection | None = None
 
     async def initialize(self) -> None:
-        self.config.kuzu_path.mkdir(parents=True, exist_ok=True)
+        self.config.kuzu_path.parent.mkdir(parents=True, exist_ok=True)
         self._db = kuzu.Database(str(self.config.kuzu_path))
         self._conn = kuzu.Connection(self._db)
         await self._create_schema()

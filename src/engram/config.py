@@ -25,6 +25,9 @@ class EngramConfig:
     cloud_embedding_model: str = "text-embedding-3-small"
     cloud_embedding_dim: int = 1536
 
+    # Google (multimodal embeddings)
+    google_api_key: str | None = None
+
     # LLM for extraction
     extraction_model: str = "gpt-4.1-nano"
     extraction_api_key: str | None = None
@@ -56,6 +59,7 @@ class EngramConfig:
             "embedding_model": "ENGRAM_EMBEDDING_MODEL",
             "extraction_model": "ENGRAM_EXTRACTION_MODEL",
             "extraction_api_key": "ENGRAM_EXTRACTION_API_KEY",
+            "google_api_key": "ENGRAM_GOOGLE_API_KEY",
             "database_url": "ENGRAM_DATABASE_URL",
         }
 
@@ -72,9 +76,16 @@ class EngramConfig:
         if kwargs.get("api_key") and "local" not in overrides:
             kwargs["local"] = False
 
+        # Also check GOOGLE_API_KEY as fallback
+        if not kwargs.get("google_api_key"):
+            kwargs.setdefault("google_api_key", os.environ.get("GOOGLE_API_KEY"))
+
         # Resolve embedding dim based on model
-        if kwargs.get("embedding_model") == "text-embedding-3-small":
+        model = kwargs.get("embedding_model", "")
+        if model == "text-embedding-3-small":
             kwargs.setdefault("embedding_dim", 1536)
+        elif model.startswith("models/") or model.startswith("gemini"):
+            kwargs.setdefault("embedding_dim", 768)
 
         return cls(**kwargs)
 

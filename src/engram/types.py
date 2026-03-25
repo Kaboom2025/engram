@@ -38,12 +38,23 @@ class RelType(str, Enum):
 
 
 class EntityType(str, Enum):
+    # Abstract entities (extracted from content)
     PERSON = "person"
     PROJECT = "project"
     TOOL = "tool"
     CONCEPT = "concept"
     PREFERENCE = "preference"
     ORGANIZATION = "organization"
+
+    # Data source nodes (the actual ingested artifacts)
+    DOCUMENT = "document"
+    CONVERSATION = "conversation"
+    IMAGE = "image"
+    VIDEO = "video"
+    AUDIO = "audio"
+    FILE = "file"
+    WEBPAGE = "webpage"
+    CODE = "code"
 
 
 # ── Core Domain Models ───────────────────────────────────────────────────────
