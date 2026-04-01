@@ -29,6 +29,7 @@ dependencies = [
     "aiosqlite>=0.19",
     "tiktoken>=0.5",
     "pyvis>=0.3",
+    "pandas>=2.0",
 ]
 
 [project.optional-dependencies]
