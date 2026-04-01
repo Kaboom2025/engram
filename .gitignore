@@ -20,7 +20,12 @@ env/
 
 # Engram data
 engram_data/
+demo_data/
+demo_api_data/
 *.db
+
+# Node
+node_modules/
 
 # OS
 .DS_Store
