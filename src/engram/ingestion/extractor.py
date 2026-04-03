@@ -4,8 +4,6 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import Any
-
 import httpx
 
 from engram.config import EngramConfig
@@ -48,6 +46,23 @@ Example output:
   }
 ]"""
 
+GLEANING_SYSTEM_PROMPT = """You previously extracted the following facts from the text below.
+Review the text again carefully. Extract any additional facts you MISSED in your first pass.
+Focus on:
+- Implicit relationships (entity A depends on B, but not stated directly)
+- Secondary entities mentioned in passing
+- Temporal facts (when things happened or changed)
+- Contradictions or updates to previously known facts
+
+Previously extracted facts:
+{previous_facts}
+
+Original text:
+{original_text}
+
+Return ONLY new facts not already in the list above. Output valid JSON array, no duplicates.
+Use the same schema as before (subject, subject_type, predicate, object, object_type, confidence, is_update, reasoning)."""
+
 
 class Extractor:
     def __init__(self, config: EngramConfig) -> None:
@@ -64,13 +79,39 @@ class Extractor:
         text: str,
         session_id: str | None = None,
     ) -> list[Fact]:
-        """Extract structured facts from text using an LLM."""
+        """Extract structured facts from text using an LLM.
+
+        Supports gleaning: after initial extraction, the LLM is called again
+        with its own output to find missed facts. Controlled by config.max_glean_rounds.
+        """
         if not text.strip():
             return []
 
         try:
             raw_json = await self._call_llm(text)
-            return self._parse_facts(raw_json, session_id)
+            facts = self._parse_facts(raw_json, session_id)
+
+            for round_num in range(self.config.max_glean_rounds):
+                if not facts:
+                    break
+                glean_prompt = GLEANING_SYSTEM_PROMPT.format(
+                    previous_facts=json.dumps(
+                        [f.model_dump(exclude={"id"}) for f in facts], default=str
+                    ),
+                    original_text=text,
+                )
+                glean_json = await self._call_llm(glean_prompt)
+                new_facts = self._parse_facts(glean_json, session_id)
+                if not new_facts:
+                    break
+                facts = [*facts, *new_facts]
+                logger.info(
+                    "Gleaning round %d: found %d additional facts",
+                    round_num + 1,
+                    len(new_facts),
+                )
+
+            return facts
         except Exception as e:
             logger.warning(f"Extraction failed: {e}")
             raise ExtractionError(f"Failed to extract facts: {e}") from e

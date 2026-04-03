@@ -37,6 +37,14 @@ class RelType(str, Enum):
     DERIVED_FROM = "derived_from"
 
 
+class QueryType(str, Enum):
+    TEMPORAL = "temporal"
+    FACTUAL = "factual"
+    PREFERENCE = "preference"
+    GLOBAL = "global"
+    DEFAULT = "default"
+
+
 class EntityType(str, Enum):
     # Abstract entities (extracted from content)
     PERSON = "person"
@@ -166,6 +174,7 @@ class SearchRequest(BaseModel):
     session_id: str | None = None
     top_k: int = 10
     token_budget: int = 4000
+    mode: str = "hybrid"  # "hybrid" or "global"
     filters: dict[str, Any] | None = None
 
 

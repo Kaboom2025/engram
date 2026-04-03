@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useState } from 'react'
 import { fetchGraph } from './api'
 import { GraphViewer } from './components/GraphViewer'
 import { SearchPanel } from './components/SearchPanel'
@@ -6,7 +6,12 @@ import { IngestPanel } from './components/IngestPanel'
 import { ComparisonTable } from './components/ComparisonTable'
 import { Architecture } from './components/Architecture'
 import { Section } from './components/Section'
+import { HERO_GRAPHS } from './data/heroGraphData'
 import type { GraphData } from './types'
+
+const PipelineVisualizer = lazy(() =>
+  import('./components/pipeline/PipelineVisualizer').then(m => ({ default: m.PipelineVisualizer }))
+)
 
 const TECH_STACK = [
   { name: 'Python', color: '#3776AB' },
@@ -19,17 +24,15 @@ const TECH_STACK = [
 ]
 
 function App() {
+  const [heroTab, setHeroTab] = useState(0)
   const [graphData, setGraphData] = useState<GraphData>({ nodes: [], edges: [] })
-  const [graphLoading, setGraphLoading] = useState(true)
 
   const loadGraph = useCallback(async () => {
     try {
       const data = await fetchGraph()
       setGraphData(data)
     } catch {
-      // API not ready yet
-    } finally {
-      setGraphLoading(false)
+      // live graph stays empty if backend is offline
     }
   }, [])
 
@@ -46,6 +49,7 @@ function App() {
         <div className="max-w-6xl mx-auto px-6 h-14 flex items-center justify-between">
           <span className="text-lg font-bold text-white tracking-tight">Engram</span>
           <div className="hidden md:flex gap-6 text-sm text-gray-400">
+            <a href="#pipeline" className="hover:text-white transition-colors">Pipeline</a>
             <a href="#graph" className="hover:text-white transition-colors">Graph</a>
             <a href="#search" className="hover:text-white transition-colors">Search</a>
             <a href="#compare" className="hover:text-white transition-colors">Compare</a>
@@ -86,19 +90,46 @@ function App() {
 
       {/* Hero Graph */}
       <div className="px-6 md:px-12 pb-8">
-        <div className="max-w-5xl mx-auto">
-          {graphLoading ? (
-            <div className="h-[500px] rounded-xl bg-surface-2 border border-border flex items-center justify-center">
-              <div className="text-center space-y-3">
-                <div className="inline-block w-8 h-8 border-3 border-accent/30 border-t-accent rounded-full animate-spin" />
-                <p className="text-sm text-gray-500">Loading knowledge graph...</p>
-              </div>
-            </div>
-          ) : (
-            <GraphViewer data={graphData} height="500px" />
-          )}
+        <div className="max-w-5xl mx-auto space-y-3">
+          {/* Tabs */}
+          <div className="flex items-center gap-1">
+            {HERO_GRAPHS.map((g, i) => (
+              <button
+                key={g.id}
+                onClick={() => setHeroTab(i)}
+                className={`px-4 py-1.5 rounded-lg text-sm font-medium transition-colors border ${
+                  heroTab === i
+                    ? 'bg-surface-2 border-border text-white'
+                    : 'bg-transparent border-transparent text-gray-500 hover:text-gray-300'
+                }`}
+              >
+                {g.label}
+              </button>
+            ))}
+            <span className="ml-2 text-xs text-gray-600">{HERO_GRAPHS[heroTab].description}</span>
+          </div>
+          <GraphViewer data={HERO_GRAPHS[heroTab].data} height="500px" />
         </div>
       </div>
+
+      {/* Pipeline Visualizer */}
+      <section id="pipeline" className="py-16 px-6 md:px-12 border-t border-border">
+        <div className="max-w-4xl mx-auto mb-8">
+          <h2 className="text-3xl font-bold text-white">How Engram Processes Data</h2>
+          <p className="mt-2 text-gray-400">
+            An interactive walkthrough of the full ingestion and retrieval pipeline — from raw text to grounded LLM context.
+          </p>
+        </div>
+        <Suspense
+          fallback={
+            <div className="h-64 flex items-center justify-center">
+              <div className="w-6 h-6 border-2 border-accent/30 border-t-accent rounded-full animate-spin" />
+            </div>
+          }
+        >
+          <PipelineVisualizer />
+        </Suspense>
+      </section>
 
       {/* The Problem */}
       <Section id="problem" title="The Problem">

@@ -1,4 +1,4 @@
-# 🧠 Engram
+# Engram
 
 **Hybrid memory layer for AI agents** — combines knowledge graph traversal, vector similarity search, and temporal awareness into a single retrieval system that actually knows what changed, what matters, and when.
 
@@ -17,6 +17,8 @@ print(ctx.text)
 # → "Alice decided on FastAPI (replaced Django). Prefers async Python."
 ```
 
+**Live demo:** [engram.saalikahmed.com](https://engram.saalikahmed.com) — interactive pipeline walkthrough + knowledge graph explorer, no API keys needed.
+
 ---
 
 ## Why Engram?
@@ -27,6 +29,8 @@ print(ctx.text)
 | Knowledge graph | ❌ | partial | ✅ | ✅ |
 | Temporal versioning | ❌ | ❌ | partial | ✅ |
 | Multi-hop traversal | ❌ | ❌ | ✅ | ✅ |
+| Global / thematic search | ❌ | ❌ | ❌ | ✅ |
+| Cross-encoder reranking | ❌ | ❌ | ❌ | ✅ |
 | Multimodal (images, audio, PDF) | ❌ | ❌ | ❌ | ✅ |
 | Fully local / embedded | ❌ | ❌ | ❌ | ✅ |
 | Open source | — | partial | partial | ✅ |
@@ -52,8 +56,8 @@ The result is *grounded context*, not just similar chunks.
 ```
                     ┌─────────────────────────────────────┐
     Input text      │         Ingestion Pipeline           │
-    conversations ──►  preprocess → LLM extract → resolve │
-    files, code     │  → temporal_link → dual-write        │
+    conversations ──►  preprocess → LLM extract → glean  │
+    files, code     │  → resolve → temporal_link → store  │
                     └──────────┬──────────────┬────────────┘
                                │              │
                     ┌──────────▼──┐   ┌───────▼──────────┐
@@ -66,7 +70,7 @@ The result is *grounded context*, not just similar chunks.
                     ┌──────────▼──────────────▼────────────┐
                     │         Retrieval Engine              │
                     │  classify → parallel search →         │
-                    │  weighted RRF fusion →                │
+                    │  weighted RRF fusion → (rerank) →     │
                     │  token-budget context assembly        │
                     └──────────────────────────────────────┘
 ```
@@ -147,11 +151,15 @@ async def main():
         session_id="session_001",
     )
 
-    # Hybrid search
+    # Hybrid search (default)
     ctx = await memory.search("What database is Alice using?", user_id="alice")
     print(ctx.text)
 
-    # Temporal history
+    # Global / thematic search — finds the most connected entities
+    ctx = await memory.search("Give me an overview of this project", user_id="alice", mode="global")
+    print(ctx.text)
+
+    # Temporal history for a specific entity
     history = await memory.history(user_id="alice", entity_name="Kuzu")
     for v in history:
         print(f"{v.entity_name}: {v.relationship_summary}")
@@ -197,6 +205,64 @@ Add to your Claude Desktop config:
 ```
 
 Tools exposed: `memory_search`, `memory_add`, `memory_history`, `memory_delete`
+
+---
+
+## Retrieval Modes
+
+### Hybrid (default)
+
+Three parallel search paths fused via weighted Reciprocal Rank Fusion:
+
+| Query type | Vector | Graph | Temporal |
+|---|---|---|---|
+| Temporal ("when did we...") | 0.20 | 0.30 | **0.50** |
+| Factual ("what is...") | 0.20 | **0.60** | 0.20 |
+| Preference ("does Alice like...") | **0.50** | 0.30 | 0.20 |
+| Default | 0.35 | 0.40 | 0.25 |
+
+Entities found across multiple paths get a **1.15–1.30× multi-source bonus** before final ranking.
+
+### Global
+
+```python
+ctx = await memory.search("What are the main themes?", user_id="alice", mode="global")
+```
+
+Triggered automatically by queries containing "overview", "themes", "what do you know about", or explicitly via `mode="global"`. Uses degree-centrality to find the most connected entities across the entire graph, then falls back to vector search for coverage. Good for summarization and broad orientation queries.
+
+### Reranker (optional)
+
+Enable a cross-encoder precision pass after RRF fusion:
+
+```python
+from engram import MemoryClient, EngramConfig
+
+memory = MemoryClient(
+    local=True,
+    config=EngramConfig(reranker_model="BAAI/bge-reranker-v2-m3", reranker_top_k=30),
+)
+```
+
+Downloads ~600MB on first use. Gives a measurable precision boost on factual queries at the cost of ~150ms latency.
+
+---
+
+## Ingestion Features
+
+### Gleaning
+
+After initial fact extraction, Engram runs a second LLM pass over its own output to catch missed facts. Controlled by `config.max_glean_rounds` (default `1`, set `0` to disable).
+
+### Entity Resolution
+
+Mentions like "FastAPI", "fast api", and "the FastAPI framework" are deduplicated into a single canonical node using:
+- Fuzzy string matching (threshold 0.85)
+- Embedding cosine similarity (threshold 0.92)
+
+### Temporal Versioning
+
+Contradicting facts are never overwritten. Every relationship has `valid_from` and optionally `invalid_from` timestamps. This means Engram can answer "what did Alice use *before* FastAPI?" correctly.
 
 ---
 
@@ -288,7 +354,7 @@ All config via env vars or `EngramConfig`:
 ENGRAM_STORAGE_PATH=./my_data
 
 # Embeddings
-ENGRAM_EMBEDDING_MODEL=all-MiniLM-L6-v2   # local
+ENGRAM_EMBEDDING_MODEL=all-MiniLM-L6-v2        # local
 ENGRAM_EMBEDDING_MODEL=text-embedding-3-small  # OpenAI
 ENGRAM_EMBEDDING_MODEL=gemini-embedding-2-preview  # Google multimodal
 
@@ -304,18 +370,17 @@ ENGRAM_API_KEY=your-engram-api-key
 ENGRAM_DATABASE_URL=postgresql://...
 ```
 
----
+Key `EngramConfig` fields:
 
-## Retrieval Weights
-
-Engram auto-classifies queries and adjusts fusion weights:
-
-| Query type | Vector | Graph | Temporal |
-|---|---|---|---|
-| Temporal ("when did we...") | 0.20 | 0.30 | **0.50** |
-| Factual ("what is...") | 0.20 | **0.60** | 0.20 |
-| Preference ("does Alice like...") | **0.50** | 0.30 | 0.20 |
-| Default | 0.35 | 0.40 | 0.25 |
+| Field | Default | Purpose |
+|---|---|---|
+| `max_glean_rounds` | `1` | LLM re-extraction passes (0 = off) |
+| `reranker_model` | `None` | Cross-encoder model name (None = off) |
+| `reranker_top_k` | `30` | Candidates fed to reranker |
+| `max_hops` | `3` | BFS depth in graph search |
+| `dedup_similarity_threshold` | `0.92` | Embedding cosine threshold for entity dedup |
+| `dedup_fuzzy_threshold` | `0.85` | Fuzzy string threshold for entity dedup |
+| `recency_decay_rate` | `0.02` | Exponential decay (half-life ~35 hours) |
 
 ---
 
@@ -329,11 +394,21 @@ pip install -e ".[dev]"
 # Run tests
 pytest tests/unit/ -v
 
+# Run with coverage
+pytest --cov=engram --cov-report=term-missing
+
+# Lint / format
+python -m ruff check src/ tests/
+python -m ruff format src/ tests/
+
 # Run demo
 python demo.py
 
 # Ingest your code
 python ingest_folder.py . --no-llm --compare "how does retrieval work?"
+
+# Frontend (React + Vite)
+cd web && npm install && npm run dev
 ```
 
 ---
@@ -342,14 +417,19 @@ python ingest_folder.py . --no-llm --compare "how does retrieval work?"
 
 - [x] Embedded local mode (Kuzu + LanceDB + SQLite)
 - [x] Hybrid retrieval (vector + graph + temporal)
+- [x] Weighted RRF fusion with multi-source bonus
+- [x] Query classification (temporal / factual / preference / global)
+- [x] Global search (degree-centrality for overview queries)
+- [x] Optional cross-encoder reranker
+- [x] Gleaning (multi-pass LLM extraction)
 - [x] Interactive graph visualization
-- [x] Google Gemini multimodal embeddings
+- [x] Google Gemini multimodal embeddings (text + image + audio + video + PDF)
 - [x] MCP server integration
-- [x] LangChain + OpenAI Agents integrations
+- [x] LangChain + OpenAI Agents SDK integrations
+- [x] React frontend with 8-panel interactive pipeline walkthrough
 - [ ] Cloud mode (PostgreSQL + managed API)
 - [ ] LongMemEval benchmark (target: >78% overall)
 - [ ] Streaming ingestion
-- [ ] Web UI for graph exploration
 
 ---
 

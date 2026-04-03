@@ -23,6 +23,7 @@ async def search_memories(
         session_id=request.session_id,
         top_k=request.top_k,
         token_budget=request.token_budget,
+        mode=request.mode,
         tenant_id=tenant_id,
     )
     return SearchResponse(

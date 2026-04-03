@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 
 
@@ -48,6 +48,13 @@ class EngramConfig:
     recency_decay_rate: float = 0.02  # half-life ~35 hours
     recency_window_days: int = 7
     reference_window_days: int = 3
+
+    # Gleaning (multi-pass extraction)
+    max_glean_rounds: int = 1  # 0 = no gleaning, 1+ = additional extraction passes
+
+    # Reranker (optional cross-encoder)
+    reranker_model: str | None = None  # e.g., "BAAI/bge-reranker-v2-m3"
+    reranker_top_k: int = 30
 
     @classmethod
     def from_env(cls, **overrides) -> EngramConfig:

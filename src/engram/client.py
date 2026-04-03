@@ -124,10 +124,11 @@ class MemoryClient:
         session_id: str | None = None,
         top_k: int = 10,
         token_budget: int = 4000,
+        mode: str = "hybrid",
         filters: dict[str, Any] | None = None,
         tenant_id: str = "default",
     ) -> MemoryContext:
-        """Search memory using hybrid retrieval (vector + graph + temporal)."""
+        """Search memory using hybrid or global retrieval."""
         await self._ensure_initialized()
         assert self._retrieval_engine is not None
         return await self._retrieval_engine.search(
@@ -136,6 +137,7 @@ class MemoryClient:
             session_id=session_id,
             top_k=top_k,
             token_budget=token_budget,
+            mode=mode,
             tenant_id=tenant_id,
         )
 
