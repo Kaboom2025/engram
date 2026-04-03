@@ -1,13 +1,10 @@
-import { lazy, Suspense, useCallback, useEffect, useState } from 'react'
-import { fetchGraph } from './api'
+import { lazy, Suspense, useState } from 'react'
 import { GraphViewer } from './components/GraphViewer'
 import { SearchPanel } from './components/SearchPanel'
-import { IngestPanel } from './components/IngestPanel'
 import { ComparisonTable } from './components/ComparisonTable'
 import { Architecture } from './components/Architecture'
 import { Section } from './components/Section'
 import { HERO_GRAPHS } from './data/heroGraphData'
-import type { GraphData } from './types'
 
 const PipelineVisualizer = lazy(() =>
   import('./components/pipeline/PipelineVisualizer').then(m => ({ default: m.PipelineVisualizer }))
@@ -25,22 +22,6 @@ const TECH_STACK = [
 
 function App() {
   const [heroTab, setHeroTab] = useState(0)
-  const [graphData, setGraphData] = useState<GraphData>({ nodes: [], edges: [] })
-
-  const loadGraph = useCallback(async () => {
-    try {
-      const data = await fetchGraph()
-      setGraphData(data)
-    } catch {
-      // live graph stays empty if backend is offline
-    }
-  }, [])
-
-  useEffect(() => { loadGraph() }, [loadGraph])
-
-  function handleIngested() {
-    loadGraph()
-  }
 
   return (
     <div className="min-h-screen bg-[#0a0a1a]">
@@ -89,9 +70,8 @@ function App() {
       </header>
 
       {/* Hero Graph */}
-      <div className="px-6 md:px-12 pb-8">
+      <div id="graph" className="px-6 md:px-12 pb-8">
         <div className="max-w-5xl mx-auto space-y-3">
-          {/* Tabs */}
           <div className="flex items-center gap-1">
             {HERO_GRAPHS.map((g, i) => (
               <button
@@ -163,16 +143,6 @@ function App() {
         </div>
       </Section>
 
-      {/* Interactive Graph */}
-      <Section
-        id="graph"
-        title="Interactive Knowledge Graph"
-        subtitle="Hover nodes to see details. Drag to rearrange. Scroll to zoom."
-      >
-        <GraphViewer data={graphData} height="600px" />
-        <IngestPanel onIngested={handleIngested} />
-      </Section>
-
       {/* Search */}
       <Section
         id="search"
@@ -221,7 +191,6 @@ function App() {
           </div>
         </div>
 
-        {/* Retrieval weights table */}
         <div className="rounded-xl bg-surface-2 border border-border overflow-hidden">
           <table className="w-full text-sm">
             <thead>
